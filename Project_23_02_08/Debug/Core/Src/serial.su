@@ -1,0 +1,4 @@
+../Core/Src/serial.c:31:6:serial_init	8	static
+../Core/Src/serial.c:39:6:serial_handlerUART	8	static
+../Core/Src/serial.c:44:6:serial_handlerDMA	8	static
+../Core/Src/serial.c:50:13:stdin_callback	16	static
