@@ -4,7 +4,7 @@ from past.builtins import raw_input
 
 """
 UI untuk:
-Project_23_02_08
+Project_
 """
 
 ser = []
