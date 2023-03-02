@@ -1,0 +1,9 @@
+../Core/Src/stdin.c:19:6:stdin_init	24	static
+../Core/Src/stdin.c:28:6:stdin_set_callback	16	static
+../Core/Src/stdin.c:33:6:stdin_flush	16	static
+../Core/Src/stdin.c:39:19:stdin_start	24	static
+../Core/Src/stdin.c:53:19:stdin_stop	24	static
+../Core/Src/stdin.c:61:6:stdin_irq_dma	16	static
+../Core/Src/stdin.c:88:6:stdin_irq_uart	24	static
+../Core/Src/stdin.c:99:13:check_buffer	24	static
+../Core/Src/stdin.c:131:13:fill_buffer	16	static
