@@ -18,7 +18,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
-static uint16_t Buffercmp(uint32_t pBuffer1[], uint32_t pBuffer2[], uint8_t length);
+static uint16_t Buffercmp(int32_t pBuffer1[], int32_t pBuffer2[], uint8_t length);
+void copyValue(int32_t target[], int32_t source[], uint8_t start_target, uint8_t start_source, uint8_t length);
 
 /* Private user code ---------------------------------------------------------*/
 #ifdef __GNUC__
@@ -27,29 +28,56 @@ static uint16_t Buffercmp(uint32_t pBuffer1[], uint32_t pBuffer2[], uint8_t leng
   #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #endif /* __GNUC__ */
 
+#ifdef RX_EVENT_CB
+static uint8_t u8arr_eventBuff[UART_BUF_SZ];
+static uint8_t u8arr_uartEvent[UART_BUF_SZ];
+#endif
+
+static uint16_t u16_oldPos = 0;
+static uint16_t u16_lenCnt = 0;
+
 /* @brief  Retargets the C library printf function to the USART. */
 PUTCHAR_PROTOTYPE {
   HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
   return ch;
 }
 
+
+
+
+/*MASTER BOARD*/
+//#define MASTER_BOARD;	/* Activated this part for make as master board*/
+
+/**********************************************************
+ * PARSING HEADER, Used in FW CONFIG - READ/WRITE Process
+ **********************************************************/
+#define CFG_LENGTH 				10
+#define CFG_HEADER_NUM 			11
+#define CFG_HEADER_LEN 			5
+#define STRLENMAX				256
+
+char sendStr[STRLENMAX];
+
+static char str_cfg_header[CFG_HEADER_NUM][CFG_HEADER_LEN] =
+{
+	"{Tes}",
+	"{RDA}",
+	"{WR1:",		"{WR2:",		"{WR3:",
+	"{RD0}",
+	"{RD1}",		"{RD2}",		"{RD3}",
+	"{WRA:"
+};
+
+/* bit flag */
+uint16_t bitFlag=0;
+
 /* I2C handler declaration */
 I2C_HandleTypeDef I2cHandle;
 
-#define MASTER_BOARD;	/*Aktifkan bagian ini jika digunakan untuk master board*/
-
-/* Default variabel for 3 array */
-#ifndef MASTER_BOARD
-	int32_t res1[10] = {1,-1,11,-11,4,-4,44,-44,7,-7};
-	int32_t res2[10] = {2,-2,22,-22,5,-5,55,-55,8,-8};
-	int32_t res3[10] = {3,-3,33,-33,6,-6,66,-66,9,-9};
-#endif
-
 /* Buffer used for transmission */
-int32_t aTxBuffer[11] = {0,10,-10,10,-10,10,-10,10,-10,10,-10};
+int32_t aTxBuffer[] = {0,10,-10,10,-10,10,-10,10,-10,10,-10};
 /* TRIGGER CODE of Slave
  * {0,-,--}  // DEFAULT
- * {-1,-,--} // Ask for the first time only
  * {1,-,--}	 // Master Transmite data to slave(res1)
  * {2,-,--}	 // Master Transmite data to slave(res2)
  * {3,-,--}	 // Master Transmite data to slave(res3)
@@ -61,24 +89,20 @@ int32_t aTxBuffer[11] = {0,10,-10,10,-10,10,-10,10,-10,10,-10};
  * {9,-,--}	 // Transmite All 3
  * */
 
-/* Used for save 3 input immediately*/
-int32_t temp[30];
-
 /* Buffer used for reception */
 int32_t aRxBuffer[11];
 
-int32_t aStartBuffer[11];
 
-#ifdef RX_EVENT_CB
-	static uint8_t u8arr_eventBuff[UART_BUF_SZ];
-	static uint8_t u8arr_uartEvent[UART_BUF_SZ];
+
+/* Default variabel for 3 array */
+#ifndef MASTER_BOARD
+int32_t res1[10] = {1,-1,11,-11,4,-4,44,-44,7,-7};
+int32_t res2[10] = {2,-2,22,-22,5,-5,55,-55,8,-8};
+int32_t res3[10] = {3,-3,33,-33,6,-6,66,-66,9,-9};
 #endif
 
-static uint16_t u16_oldPos = 0;
-static uint16_t u16_lenCnt = 0;
+int32_t temp[30];
 
-/* bit flag */
-uint8_t bitFlag = 0;
 
 int main(void)
 {
@@ -114,72 +138,178 @@ int main(void)
   #endif
 
   /****************** MAIN **********************/
-  while (1) {
+  while (1)
+  {
 	  /*Perintah untuk kirim data ke UART*/
   	  if (bitFlag & BFLAG_UART_RCV) {
   		  uartProcessing (u8arr_uartEvent, u16_lenCnt - 2); // remove \r & \n
   		  memset(u8arr_uartEvent, 0, UART_BUF_SZ);
   		  u16_lenCnt = 0;
 
-  		  /* Reset bit 0 bitflag */
   		  bitFlag 	&= ~BFLAG_UART_RCV;
   	  }
 
-  	  if (bitFlag & BFLAG_I2C_RSL) {
-		#ifdef MASTER_BOARD
-  		  /* Master give trigger to Slave*/
-  		  for (uint8_t i=4; i<=6; i++){
-  			  aTxBuffer[0] = i;
-  			  do
-  			  {
-  				  /*##-2- Proses transmission START #####################################*/
-  				  if(HAL_I2C_Master_Transmit_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t*)aTxBuffer, TXBUFFERSIZE)!= HAL_OK)
-  				  {Error_Handler();}
+  	  // Trigger default input at form
+  	  if (bitFlag & BFLAG_I2C_RDA) {
+		  #ifdef MASTER_BOARD
+		  for (uint8_t i=4; i<=6; i++){
+			  aTxBuffer[0] = i;
+			  do
+			  {
+				  /*##-2- Proses transmission START #####################################*/
+				  if(HAL_I2C_Master_Transmit_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t*)aTxBuffer, TXBUFFERSIZE)!= HAL_OK)
+				  {Error_Handler();}
 
-  				  /*##-3- Menunggu transfer data selesai ###################################*/
-  				  while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY)
-  				  {}
-  				  //printf("Access Slave Success!!\r\n\n");
-  			  } while(HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
+				  /*##-3- Menunggu transfer data selesai ###################################*/
+				  while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY)
+				  {}
+			  } while(HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
 
-  			  /* Master recieve data from Slave*/
-  			  /*##-4- I2C periperal siap menerima data ############################*/
-  			  do
-  			  {
-  				  if(HAL_I2C_Master_Receive_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t *)aStartBuffer, RXBUFFERSIZE) != HAL_OK) {Error_Handler();}
+			  /* Master recieve data from Slave*/
+			  /*##-4- I2C periperal siap menerima data ############################*/
+			  do
+			  {
+				  if(HAL_I2C_Master_Receive_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t *)aRxBuffer, RXBUFFERSIZE) != HAL_OK) {Error_Handler();}
 
-  				  /* Saat Acknowledge failure (Slave tidak mengakui alamatnya) Master memulai ulang komunikasi */
-  			  } while (HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
+				  /* Saat Acknowledge failure (Slave tidak mengakui alamatnya) Master memulai ulang komunikasi */
+			  } while (HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
 
-  			  /*##-5- Menunggu akhir transfer ###################################*/
-  			  while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY)
-  			  {}
-  			  if (aStartBuffer[0]==4){
-  				  printf("R1: ");
-  			  }
-  			  else if (aStartBuffer[0]==5){
-  				  printf("R2: ");
-  			  }
-  			  else if (aStartBuffer[0]==6){
-  				  printf("R3: ");
-  			  }
-  			  printf("%ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld;\r\n",
-  	  				 aStartBuffer[1], aStartBuffer[2], aStartBuffer[3],
-					 aStartBuffer[4], aStartBuffer[5], aStartBuffer[6],
-					 aStartBuffer[7], aStartBuffer[8], aStartBuffer[9], aStartBuffer[10]);
-
-  		  }
-  		  printf("END\r\n");
-
-  		  bitFlag &= ~BFLAG_I2C_RSL;
-		#endif
+			  /*##-5- Menunggu akhir transfer ###################################*/
+			  while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY)
+			  {}
+			  if (aRxBuffer[0]==4){
+				  printf("R1: ");
+			  }
+			  else if (aRxBuffer[0]==5){
+				  printf("R2: ");
+			  }
+			  else if (aRxBuffer[0]==6){
+				  printf("R3: ");
+			  }
+			  printf("%ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld;\r\n",
+					 aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
+					 aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
+					 aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
+		  }
+		  printf("END\r\n");
+		  bitFlag &= ~BFLAG_I2C_RDA;
+		  #endif
   	  }
 
-  	  /* Perintah untuk WRITE atau sending I2C */
-  	  if ((bitFlag & BFLAG_I2C_WR1) || (bitFlag & BFLAG_I2C_WR2) || (bitFlag & BFLAG_I2C_WR3)) {
-	  	  #ifdef MASTER_BOARD
-			  //printf("Master I2C Sending code %ld\r\n", aTxBuffer[0]);
+  	  /* Command to receive from I2C */
+  	  if (bitFlag & BFLAG_I2C_RDS)
+  	  {
+			#ifdef MASTER_BOARD
+			/*##-4- I2C periperal siap menerima data ############################*/
+			do {
+				if(HAL_I2C_Master_Receive_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t *)aRxBuffer, RXBUFFERSIZE) != HAL_OK) {Error_Handler();}
+			} while (HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
 
+			/*##-5- Menunggu akhir transfer ###################################*/
+			while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY){}
+
+
+			// BFLAG_I2C_WRS		WRITE SLAVE
+			if (aRxBuffer[0]==1)				//WR1
+			{
+				printf("Send RES1: \r\n");
+			}
+			if (aRxBuffer[0]==2)				//WR2
+			{
+				printf("Send RES2: \r\n");
+			}
+			if (aRxBuffer[0]==3)				//WR3
+			{
+				printf("Send RES3: \r\n");
+			}
+
+			if (aRxBuffer[0]<4)				// Compare TxBuffer and Rx Buffer
+			{
+				/*##-6- Compare the sent and received buffers ##############################*/
+				if(Buffercmp(aTxBuffer,aRxBuffer, 11)){
+					printf("Buffer compare Fail!!!\r\n\n");
+				}
+				bitFlag 	&= ~BFLAG_I2C_WRS;
+			}
+
+
+			// BFLAG_I2C_RDS		READ SLAVE
+			if (aRxBuffer[0]==4)				//RD1
+			{
+				printf("Read RES1: ");
+			}
+			if (aRxBuffer[0]==5)				//RD2
+			{
+				printf("READ RES2: ");
+			}
+			if (aRxBuffer[0]==6)				//RD3
+			{
+				printf("READ RES3: ");
+			}
+
+			if ((aRxBuffer[0]>=4) && (aRxBuffer[0]<=6)){				// Print the variable value
+				printf("%ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n\n",
+						aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
+						aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
+						aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
+				bitFlag 	&= ~BFLAG_I2C_WRS;
+			}
+
+			// BFLAG_I2C_RDA			Trigger default input at form
+			if (aRxBuffer[0]==7)				//WRA
+			{
+				for (uint8_t i=0; i<10; i++){
+					aTxBuffer[i+1] = 0;
+				}
+				copyValue(aTxBuffer, temp, 1, 10, 10);
+				aTxBuffer[0]=8;
+			}
+			if (aRxBuffer[0]==8)
+			{
+				for (uint8_t i=0; i<10; i++){
+					aTxBuffer[i+1] = 0;
+				}
+				copyValue(aTxBuffer, temp, 1, 20, 10);
+				aTxBuffer[0]=9;
+			}
+			if (aRxBuffer[0]==9)
+			{
+				bitFlag &= ~BFLAG_I2C_WRS;
+			}
+
+			if (aRxBuffer[0]>=7)				// Print the variable value
+			{
+				printf("%ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n\n",
+						aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
+						aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
+						aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
+			}
+
+			/* Reset bit 1 bitflag */
+			bitFlag 	&= ~BFLAG_I2C_RDS;
+		#endif
+	 }
+
+	 if (bitFlag & BFLAG_I2C_RDB)
+	 {
+		 #ifdef MASTER_BOARD
+
+			 printf("Code: %ld\nTX integer: %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n",
+					 aTxBuffer[0], aTxBuffer[1], aTxBuffer[2], aTxBuffer[3],
+					 aTxBuffer[4], aTxBuffer[5], aTxBuffer[6],
+					 aTxBuffer[7], aTxBuffer[8], aTxBuffer[9], aTxBuffer[10]);
+			 printf("Code: %ld\nRX integer: %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n\n",
+					 aRxBuffer[0], aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
+					 aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
+					 aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
+
+			 bitFlag 	&= ~BFLAG_I2C_RDB;
+		 #endif
+	 }
+
+  	  /* Command to WRITE or sending I2C */
+  	  if ((bitFlag & BFLAG_I2C_WRS) || (bitFlag & BFLAG_I2C_WRA)) {
+	  	  #ifdef MASTER_BOARD
 			  do
 			  {
 				  /*##-2- Proses transmission START #####################################*/
@@ -192,136 +322,14 @@ int main(void)
 				  printf("Sending Success!!\r\n");
 			  } while(HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
 
-			  bitFlag |= BFLAG_I2C_RD1;
+			  bitFlag |= BFLAG_I2C_RDS;
 			  /* Reset bit 2 bitflag ada di bagian BFLAG_I2C_RD0 */
 	  	  #endif
   	 }
 
-  	/* Perintah untuk Compare buffer dan READ dari I2C */
-  	 if (bitFlag & BFLAG_I2C_RD1)
+  	 else
   	 {
-  		 #ifdef MASTER_BOARD
-  		 	 /*##-4- I2C periperal siap menerima data ############################*/
-  			 do {
-  				 //printf("Master I2C Receiving... \r\n");
-
-  				 if(HAL_I2C_Master_Receive_IT(&I2cHandle, (uint16_t)I2C_ADDRESS, (uint8_t *)aRxBuffer, RXBUFFERSIZE) != HAL_OK) {Error_Handler();}
-
-  				 /* Saat Acknowledge failure (Slave tidak mengakui alamatnya) Master memulai ulang komunikasi */
-  			 } while (HAL_I2C_GetError(&I2cHandle) == HAL_I2C_ERROR_AF);
-
-  			 /*##-5- Menunggu akhir transfer ###################################*/
-  			 while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY){}
-  			 //printf("Master I2C Receive Success\r\n\n");
-
-  			 /* Jika di write di form 1 maka nilai buffer disimpan di var res1 dan atur BFLAG_I2C_WR1*/
-  			 if ((bitFlag & BFLAG_I2C_WR1) && aRxBuffer[0]==1)
-  			 {
-  				 printf("Send RES1: \r\n");
-
-  				 /* Reset bitflag */
-  				 bitFlag 	&= ~BFLAG_I2C_WR1;
-  			 }
-  			 if ((bitFlag & BFLAG_I2C_WR2) && aRxBuffer[0]==2)
-  			 {
-  				 printf("Send RES2: \r\n");
-
-  				 /* Reset bitflag */
-  				 bitFlag 	&= ~BFLAG_I2C_WR2;
-  			 }
-  			 if ((bitFlag & BFLAG_I2C_WR3) && aRxBuffer[0]==3)
-  			 {
-  				 printf("Send RES3: \r\n");
-
-  				 /* Reset bitflag */
-  				 bitFlag 	&= ~BFLAG_I2C_WR3;
-  			 }
-  			 if ((bitFlag & BFLAG_I2C_WR1) && aRxBuffer[0]==4)
-  			 {
-  				 printf("Read RES1: ");
-
-  				 /* Reset bitflag */
-  				 bitFlag 	&= ~BFLAG_I2C_WR1;
-  			 }
-  			 else if ((bitFlag & BFLAG_I2C_WR2) && aRxBuffer[0]==5)
-			 {
-  				 printf("READ RES2: ");
-
-  				/* Reset bitflag */
-				 bitFlag 	&= ~BFLAG_I2C_WR2;
-			 }
-  			 else if ((bitFlag & BFLAG_I2C_WR3) && aRxBuffer[0]==6)
-			 {
-  				 printf("READ RES3: ");
-
-  				/* Reset bitflag */
-				 bitFlag 	&= ~BFLAG_I2C_WR3;
-			 }
-  			 else if ((bitFlag & BFLAG_I2C_WR1) && aRxBuffer[0]==7)
-			 {
-  				for (uint8_t i=0; i<10; i++){
-					aTxBuffer[i+1] = 0;
-				}
-				copyValue(temp, aTxBuffer, 10, 10);
-				aTxBuffer[0]=8;
-				bitFlag |= BFLAG_I2C_WR2;
-				bitFlag &= ~BFLAG_I2C_WR1;
-			 }
-  			 else if ((bitFlag & BFLAG_I2C_WR2) && aRxBuffer[0]==8)
-			 {
-  				for (uint8_t i=0; i<10; i++){
-					aTxBuffer[i+1] = 0;
-				}
-				copyValue(temp, aTxBuffer, 20, 10);
-				aTxBuffer[0]=9;
-				bitFlag |= BFLAG_I2C_WR3;
-				bitFlag &= ~BFLAG_I2C_WR2;
-			 }
-			 else if ((bitFlag & BFLAG_I2C_WR3) && aRxBuffer[0]==9)
-			 {
-				bitFlag &= ~BFLAG_I2C_WR3;
-			 }
-
-  			 if (aRxBuffer[0]<4)
-  			 {
-  				 /*##-6- Compare the sent and received buffers ##############################*/
-				 if(Buffercmp(aTxBuffer,aRxBuffer, 11)){
-					 printf("Buffer compare Fail!!!\r\n\n");
-				 }
-  			 }
-  			 else if (aRxBuffer[0]>=4){
-  				 printf("%ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n\n",
-  						 aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
-						 aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
-						 aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
-  			 }
-
-
-  			 /* Reset bit 1 bitflag */
-			 bitFlag 	&= ~BFLAG_I2C_RD1;
-		 #endif
-	 }
-  	 if (bitFlag & BFLAG_I2C_RD0)
-  	 {
-  	  	 #ifdef MASTER_BOARD
-
-  	  		 printf("Code: %ld\nTX integer: %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n",
-  	  				 aTxBuffer[0], aTxBuffer[1], aTxBuffer[2], aTxBuffer[3],
-					 aTxBuffer[4], aTxBuffer[5], aTxBuffer[6],
-					 aTxBuffer[7], aTxBuffer[8], aTxBuffer[9], aTxBuffer[10]);
-  	  		 printf("Code: %ld\nRX integer: %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld; %ld\r\n\n",
-  	  				 aRxBuffer[0], aRxBuffer[1], aRxBuffer[2], aRxBuffer[3],
-					 aRxBuffer[4], aRxBuffer[5], aRxBuffer[6],
-					 aRxBuffer[7], aRxBuffer[8], aRxBuffer[9], aRxBuffer[10]);
-
-  	  		 /* Reset bit 1 bitflag */
-  			 bitFlag 	&= ~BFLAG_I2C_RD0;
-  		 #endif
-  	 }
-
-  	 else			// Atur default jika nilai bitFlag 0000 0000 atau default
-  	 {
-		#ifndef MASTER_BOARD			//Hanya di def untuk Slave
+		#ifndef MASTER_BOARD			// Slave Only
   		 	 if(HAL_I2C_Slave_Receive_IT(&I2cHandle, (uint8_t *)aRxBuffer, RXBUFFERSIZE) != HAL_OK)
   		 	 {Error_Handler();}
 
@@ -329,45 +337,40 @@ int main(void)
   		 	 while (HAL_I2C_GetState(&I2cHandle) != HAL_I2C_STATE_READY)
   		 	 {}
 
-  		 	 if(aRxBuffer[0]==-1)
+  		 	 if((aRxBuffer[0]==1)||(aRxBuffer[0]==7))		// WR1
   		 	 {
-  		 		 MoveResToBuffer(res1, aTxBuffer, 10);
-
-  		 	 }
-  		 	 else if((aRxBuffer[0]==1)||(aRxBuffer[0]==7))
-  		 	 {
-  		 		 MoveBufferToRes(aRxBuffer, res1, 10);
-				 MoveResToBuffer(res1, aTxBuffer, 10);
+  		 		 copyValue(res1, aRxBuffer, 0, 1, 10);
+				 copyValue(aTxBuffer, res1, 1, 0, 10);
 				 if(aRxBuffer[0]==1){aTxBuffer[0] = 1;}
 				 if(aRxBuffer[0]==7){aTxBuffer[0] = 7;}
   		 	 }
-  		 	 else if((aRxBuffer[0]==2)||(aRxBuffer[0]==8))
+  		 	 else if((aRxBuffer[0]==2)||(aRxBuffer[0]==8))	// WR2
 			 {
-				 MoveBufferToRes(aRxBuffer, res2, 10);
-				 MoveResToBuffer(res2, aTxBuffer, 10);
+  		 		 copyValue(res2, aRxBuffer, 0, 1, 10);
+				 copyValue(aTxBuffer, res2, 1, 0, 10);
 				 if(aRxBuffer[0]==2){aTxBuffer[0] = 2;}
 				 if(aRxBuffer[0]==8){aTxBuffer[0] = 8;}
 			 }
-  		 	 else if((aRxBuffer[0]==3)||(aRxBuffer[0]==9))
+  		 	 else if((aRxBuffer[0]==3)||(aRxBuffer[0]==9))	// WR3
 			 {
-				 MoveBufferToRes(aRxBuffer, res3, 10);
-				 MoveResToBuffer(res3, aTxBuffer, 10);
+  		 		 copyValue(res3, aRxBuffer, 0, 1, 10);
+				 copyValue(aTxBuffer, res3, 1, 0, 10);
 				 if(aRxBuffer[0]==3){aTxBuffer[0] = 3;}
 				 if(aRxBuffer[0]==9){aTxBuffer[0] = 9;}
 			 }
-  		 	 else if(aRxBuffer[0]==4)
+  		 	 else if(aRxBuffer[0]==4)			// RD1
 			 {
-  		 		 MoveResToBuffer(res1, aTxBuffer, 10);
+  		 		 copyValue(aTxBuffer, res1, 1, 0, 10);
   		 		 aTxBuffer[0] = 4;
 			 }
-  		 	 else if(aRxBuffer[0]==5)
+  		 	 else if(aRxBuffer[0]==5)			// RD2
 			 {
-  		 		 MoveResToBuffer(res2, aTxBuffer, 10);
+  		 		 copyValue(aTxBuffer, res2, 1, 0, 10);
   		 		 aTxBuffer[0] = 5;
 			 }
-  		 	 else if(aRxBuffer[0]==6)
+  		 	 else if(aRxBuffer[0]==6)			// RD3
 			 {
-  		 		 MoveResToBuffer(res3, aTxBuffer, 10);
+  		 		 copyValue(aTxBuffer, res3, 1, 0, 10);
   		 		 aTxBuffer[0] = 6;
 			 }
 
@@ -391,13 +394,10 @@ int main(void)
   * @note	Turn LED2 on: Jika kirim data berhasil
   ***********************************************************************************/
 #ifdef MASTER_BOARD
-//Untuk MASTER BOARD
 void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *I2cHandle){
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 }
-
 #else
-//Untuk SLAVE
 void HAL_I2C_SlaveTxCpltCallback(I2C_HandleTypeDef *I2cHandle){
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 }
@@ -410,12 +410,10 @@ void HAL_I2C_SlaveTxCpltCallback(I2C_HandleTypeDef *I2cHandle){
   * @note	Turn LED2 on: Jika menerima data berhasil
   ************************************************************************************/
 #ifdef MASTER_BOARD
-// MASTER BOARD
 void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *I2cHandle) {
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 }
 #else
-// SLAVE
 void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *I2cHandle){
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 }
@@ -440,34 +438,16 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *I2cHandle){
   * @retval 0  : pBuffer1 identical to pBuffer2
   *         >0 : pBuffer1 differs from pBuffer2
   */
-static uint16_t Buffercmp(uint32_t pBuffer1[], uint32_t pBuffer2[], uint8_t length){
-	printf("Compare prosess...\r\n");
-	for (uint8_t i = 0; i <= length; i++){
-		if (pBuffer1[i]!=pBuffer1[i]){
+static uint16_t Buffercmp(int32_t pBuffer1[], int32_t pBuffer2[], uint8_t length){
+	printf("Compare process...\r\n");
+	for (uint8_t i = 0; i < length; i++){
+		if (pBuffer1[i]!=pBuffer2[i]){
 			printf("Buffer different!!!\r\n");
 			return i;
 		}
 	}
 	printf("Buffer same!!!\r\n");
 	return 0;
-}
-
-void MoveBufferToRes(uint32_t pBuffer[], uint32_t pRes[], uint8_t length){
-	for (uint8_t i = 0; i <= length; i++){
-		pRes[i] = pBuffer[i+1];
-	}
-}
-
-void MoveResToBuffer(uint32_t pRes[], uint32_t pBuffer[], uint8_t length){
-	for (uint8_t i = 0; i <= length; i++){
-		pBuffer[i+1] = pRes[i];
-	}
-}
-
-void copyValue(uint32_t source[], uint32_t target[], uint8_t start, uint8_t length){
-	for (uint8_t i = 0; i < length; i++){
-		target[i+1] = source[i+start];
-	}
 }
 
 /* @brief System Clock Configuration */
@@ -562,22 +542,6 @@ static void MX_GPIO_Init(void) {
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 }
 
-/**********************************************************
- * PARSING HEADER, Used in FW CONFIG - READ/WRITE Process
- **********************************************************/
-#define CFG_HEADER_NUM 			11
-#define CFG_HEADER_CHARS_LEN 	5
-#define STRLENMAX				256
-
-static char str_cfg_header[CFG_HEADER_NUM][CFG_HEADER_CHARS_LEN] =
-{
-	"{Tes}",
-	"{RSL}",
-	"{WR1:",		"{WR2:",		"{WR3:",
-	"{RD0}",
-	"{RD1}",		"{RD2}",		"{RD3}",
-	"{WRA:"
-};
 
 /*********************************************************************
  * @name	: tinysh_dec
@@ -612,14 +576,26 @@ long tinysh_dec(char *s) {
   return (res * min);
 }
 
+
+/* @name	: copyValue
+ * @brief 	: Copy Array
+ * @target	: array of target to place the value
+ * @source	: array with data witch copied
+ * @start_target, @start_source, @length*/
+void copyValue(int32_t target[], int32_t source[], uint8_t start_target, uint8_t start_source, uint8_t length){
+	for (uint8_t i = 0; i < length; i++){
+		target[i+start_target] = source[i+start_source];
+	}
+}
+
 /********************************************************
  * 	Parsing incoming message						   	*
  ********************************************************/
 static void vShell_cmdParse(char *input) {
 	for(uint8_t u8_idx = 0; u8_idx < CFG_HEADER_NUM; u8_idx++) {
-		if(!memcmp(input,(char*)&str_cfg_header[u8_idx][0], CFG_HEADER_CHARS_LEN)) {
-			char *pChar 		= &input[CFG_HEADER_CHARS_LEN];		//pointer untuk menyimpan header (5 char)
-			char *pChar2 		= &input[CFG_HEADER_CHARS_LEN];		//pointer untuk menyimpan header (5 char)
+		if(!memcmp(input,(char*)&str_cfg_header[u8_idx][0], CFG_HEADER_LEN)) {
+			char *pChar 		= &input[CFG_HEADER_LEN];		//pointer untuk menyimpan header (5 char)
+			char *pChar2 		= &input[CFG_HEADER_LEN];		//pointer untuk menyimpan header (5 char)
 			uint8_t u8_start 	= 0;			// ini penanda yang akan bergeser tiap indeks (menandai lokasi dari sparating symboll)
 			uint8_t u8_stop 	= 0;			// ini penenda start pointer paling awal atau awal baru setelah sparating symboll
 			uint8_t u8_cnt 		= 0;			// menampung ada berapa sih inputan nya
@@ -627,26 +603,24 @@ static void vShell_cmdParse(char *input) {
 			char str_res[20];
 
 			if (u8_idx==1) {
-				bitFlag |= BFLAG_I2C_RSL;
+				bitFlag |= BFLAG_I2C_RDA;
 			}
 
-			else if (u8_idx == 5){		//{RD0}
-				/* READ HEADER */
-				bitFlag |= BFLAG_I2C_RD0;
+			else if (u8_idx == 5){		//{RD0} Read Buffer TX and RX from Master
+				bitFlag |= BFLAG_I2C_RDB;
 			}
 
-			/* READ HEADER */
 			else if (u8_idx == 6){ 		//{RD1} Read from res1
 				aTxBuffer[0]=4;
-				bitFlag |= BFLAG_I2C_WR1;
+				bitFlag |= BFLAG_I2C_WRS;
 			}
 			else if (u8_idx == 7){ 		//{RD2} Read from res2
 				aTxBuffer[0]=5;
-				bitFlag |= BFLAG_I2C_WR2;
+				bitFlag |= BFLAG_I2C_WRS;
 			}
 			else if (u8_idx == 8){		//{RD3} Read from res3
 				aTxBuffer[0]=6;
-				bitFlag |= BFLAG_I2C_WR3;
+				bitFlag |= BFLAG_I2C_WRS;
 			}
 
 			else if (u8_idx == 9){		//{WRA: Read all
@@ -669,9 +643,10 @@ static void vShell_cmdParse(char *input) {
 								aTxBuffer[i+1] = 0;
 							}
 
-							copyValue(temp, aTxBuffer, 0, 10);
+							//copyValue(temp, aTxBuffer, 0, 10);
+							memcpy(&aTxBuffer[1], &temp[0], 10);
 							aTxBuffer[0]=7;
-							bitFlag |= BFLAG_I2C_WR1;
+							bitFlag |= BFLAG_I2C_WRS;
 						}
 						u8_cnt++;
 					}
@@ -699,22 +674,18 @@ static void vShell_cmdParse(char *input) {
 
 						if(*pChar == ';') { u8_stop = u8_start + 1; }
 						else if(*pChar == '}') {
-							if (u8_idx == 2){ //Write at form 1
+							if (u8_idx == 2){ // {WR1: Write at form 1
 								/*Set first index as a trigger for slave*/
 								aTxBuffer[0]=1;
-								bitFlag |= BFLAG_I2C_WR1;
-								bitFlag |= BFLAG_I2C_RD0;
 							}
-							else if (u8_idx == 3){ //Write at form 2
+							else if (u8_idx == 3){ // {WR2: Write at form 2
 								aTxBuffer[0]=2;
-								bitFlag |= BFLAG_I2C_WR2;
-								bitFlag |= BFLAG_I2C_RD0;
 							}
-							else if (u8_idx == 4){ //Write at form 3
+							else if (u8_idx == 4){ // {WR3: Write at form 3
 								aTxBuffer[0]=3;
-								bitFlag |= BFLAG_I2C_WR3;
-								bitFlag |= BFLAG_I2C_RD0;
 							}
+							bitFlag |= BFLAG_I2C_WRS;
+							bitFlag |= BFLAG_I2C_RDB;
 						}
 						u8_cnt++;
 					}
@@ -797,18 +768,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 	#endif
 }
 
-
-/************************************************************
-  * @brief Button Callback
-  * @param GPIO_Pin: Specifies the pins connected EXTI line
-  ***********************************************************/
-/*void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  if ((GPIO_Pin == B1_Pin) && ((bitFlag & BFLAG_BTN) == 0))
-  {
-	  bitFlag |= BFLAG_BTN;
-  }
-}*/
 
 
 /*******************************************************************

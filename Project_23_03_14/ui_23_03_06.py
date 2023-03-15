@@ -1,6 +1,7 @@
 """
 STM32Nucleo buffer
-This is UI for project_23_03_06
+This is UI for project_23_03_14
+Make reparation concept
 UI for I2C multi input and for the first Connected to Serial, the form will show the default value from Slave
 This UI will accept string input, send it to Master as ASCII decode.
 Data will parsing into integer and will be send by I2C to Slave and it will be saved.
@@ -340,7 +341,7 @@ class Ui_Form(object):
 
         #Verify the correct COM Port
         try:
-            mytext = "{RSL}\r\n"  # Send first enter
+            mytext = "{RDA}\r\n"  # Send first enter
             self.getAll = 1
 
             if(self.cb_Port.currentText() == "USB"):

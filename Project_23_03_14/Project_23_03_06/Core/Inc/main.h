@@ -45,13 +45,12 @@ void Error_Handler(void);
 void i2cProcessing (uint8_t *u8p_buffer, uint16_t u16_size);
 void uartProcessing (uint8_t *u8p_buffer, uint16_t u16_size);
 
-#define BFLAG_UART_RCV								(1 << 0)		// Default 0000 0001
-#define BFLAG_I2C_RSL								(1 << 1)		// Default 0000 0010
-#define BFLAG_I2C_RD0								(1 << 2)		// Default 0000 0100
-#define BFLAG_I2C_RD1								(1 << 3)		// Default 0000 1000
-#define BFLAG_I2C_WR1								(1 << 4)		// Default 0001 0000
-#define BFLAG_I2C_WR2							 	(1 << 5)		// Default 0010 0000
-#define BFLAG_I2C_WR3							 	(1 << 6)		// Default 0100 0000
+#define BFLAG_UART_RCV		(1 << 0)		// To Interact with UART
+#define BFLAG_I2C_RDA		(1 << 1)		// To Trigger default input at form
+#define BFLAG_I2C_RDB		(1 << 2)		// To Read Master Buffer
+#define BFLAG_I2C_RDS		(1 << 3)		// To Read data from Slave
+#define BFLAG_I2C_WRA		(1 << 4)		// To Write all form data to Slave
+#define BFLAG_I2C_WRS		(1 << 5)		// To Write data to Slave
 
 
 #define RX_EVENT_CB
