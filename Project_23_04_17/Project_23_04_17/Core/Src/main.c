@@ -42,7 +42,7 @@ static uint8_t u8arr_uartEvent[UART_BUF_SZ];
 static uint16_t u16_oldPos = 0;
 static uint16_t u16_lenCnt = 0;
 
-#define MASTER_BOARD
+//#define MASTER_BOARD
 
 /* Buffer used for transmission */
 int32_t aTxBuffer[11] = {1, -10, 10, -10, 10, -10, 10, -10, 10, -10, 10};

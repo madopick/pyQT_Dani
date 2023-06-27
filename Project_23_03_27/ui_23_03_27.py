@@ -637,7 +637,7 @@ class Ui_Form(object):
         self.command_value.setText("Write to serial WR2")
 
     def write3(self):
-        mytext_byte = [123, 87, 66, 51, 58]  # {WB2:
+        mytext_byte = [123, 87, 66, 51, 58]  # {WB3:
 
         for i in range(len(self.input3)):
             data = integer_to_byte(int(self.input3[i].text()))
