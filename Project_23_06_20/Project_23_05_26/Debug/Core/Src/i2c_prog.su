@@ -1,0 +1,6 @@
+../Core/Src/i2c_prog.c:26:10:Buffercmp_Byte	104	static
+../Core/Src/i2c_prog.c:45:6:I2C_Master_Transmit	8	static
+../Core/Src/i2c_prog.c:57:6:I2C_Master_Receive	8	static
+../Core/Src/i2c_prog.c:70:6:I2C_Slave_Transmit	8	static
+../Core/Src/i2c_prog.c:79:6:I2C_Slave_Receive	8	static
+../Core/Src/i2c_prog.c:88:6:Set_aTxBuffer	32	static
