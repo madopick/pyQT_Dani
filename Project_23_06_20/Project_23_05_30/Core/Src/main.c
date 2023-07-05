@@ -21,6 +21,15 @@
 #include "main.h"
 #include "usb_device.h"
 
+UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_i2c1_rx;
+DMA_HandleTypeDef hdma_i2c1_tx;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_usart3_rx;
+I2C_HandleTypeDef hi2c1;
+SPI_HandleTypeDef hspi1;
+
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
